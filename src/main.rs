@@ -1,7 +1,7 @@
 extern crate image;
 extern crate clap;
 
-use clap::{Arg, App, AppSettings, SubCommand};
+use clap::{Arg, App, AppSettings};
 use image::{ImageBuffer, GenericImageView};
 use std::fs::File;
 use std::io::Read;
@@ -37,28 +37,25 @@ fn main() {
         .long("lsb")
         .value_name("FILE")
         .help("Extract content using least significant bit technique")
-        .takes_value(true));
+        .takes_value(true))
+    .arg(Arg::with_name("switch_endian")
+        .short("sw")
+        .long("switch_endian")
+        .value_name("bool")
+        .help("Swap the current byte representation LSB to MSB")
+        .takes_value(false));
 
     let matches = app.get_matches();
 
 //    let lsb_tech = matches.value_of("lsb_tech");
 
     if let Some(source) = matches.value_of("reverse") {
-        reverse_file(source.to_string(), false);
+        reverse_file(source.to_string(), matches.is_present("switch_endian"));
     }
 
     if let Some(source) = matches.value_of("lsb_tech") {
         process_image(source.to_string());
     }
-
-
-//    match lsb_tech {
-//        None => None,
-//        Some(s) => {
-//            println!("My path is {}.", s.to_string());
-////            process_image("images/agent2_.jpg".to_string())
-//        }
-//    };
 }
 
 fn process_image(image: String) {
@@ -171,6 +168,14 @@ fn transform_bytes(lsb_slot: &mut Vec<u8>, big_endian: bool) -> u8 {
     result
 }
 
+fn reverse_bits(byte: u8, big_endian: bool) -> u8 {
+    let mut result = 0b0000_0000;
+
+
+
+    result
+}
+
 fn reverse_file(file_loc: String, swap_endian: bool) {
     println!("processing: {}", file_loc);
 
@@ -191,8 +196,23 @@ fn reverse_file(file_loc: String, swap_endian: bool) {
     println!("reversing {}, buffer size: {}", file_loc, data.len());
 
     data.reverse();
-    
-    r_file.write_all(&data).expect("Unable to write data");
+
+    if swap_endian {
+        let mut data_iter = data.iter();
+        let mut bytes_count: i32 = 0;
+
+        while let Some(byte) = data_iter.next() {
+            println!("result befor {:#b}", byte);
+            let reversed= reverse_bits(*byte, swap_endian);
+            println!("result after {:#b}", reversed);
+
+            bytes_count += 1;
+        }
+
+        println!("swapped each bit for buffer size: {}", bytes_count);
+    } else {
+        r_file.write_all(&data).expect("Unable to write data");
+    }
 
     println!("complete.");
 }
