@@ -4,6 +4,7 @@ extern crate clap;
 use clap::{Arg, App, AppSettings, SubCommand};
 use image::{ImageBuffer, GenericImageView};
 use std::fs::File;
+use std::io::Read;
 use std::io::Write;
 //use std::io::BufReader;
 use std::path::Path;
@@ -14,6 +15,8 @@ use std::path::Path;
 //use std::ffi::OsStr;
 //use std::convert::AsRef;
 use std::env;
+
+use std::io::BufReader;
 
 fn main() {
     let app = App::new("stim")
@@ -168,7 +171,28 @@ fn transform_bytes(lsb_slot: &mut Vec<u8>, big_endian: bool) -> u8 {
     result
 }
 
-fn reverse_file(image: String, big_endian: bool) {
-    println!("processing image: {}", image);
-    println!("Sorry WIP, please be patient...");
+fn reverse_file(file_loc: String, swap_endian: bool) {
+    println!("processing: {}", file_loc);
+
+    let string_reverse = file_loc.clone() + &".reversed.bin".to_string();
+    let r_path = Path::new(string_reverse.as_str());
+
+    let path = Path::new(file_loc.as_str());
+
+    let mut file = File::open(&path).unwrap();
+    let mut r_file = File::create(&r_path).unwrap();
+
+    println!("reading {}, size: {}", file_loc, file.metadata().unwrap().len());
+
+    let mut data: Vec<u8> = Vec::with_capacity(file.metadata().unwrap().len() as usize);
+
+    file.read_to_end(&mut data).unwrap();
+
+    println!("reversing {}, buffer size: {}", file_loc, data.len());
+
+    data.reverse();
+    
+    r_file.write_all(&data).expect("Unable to write data");
+
+    println!("complete.");
 }
