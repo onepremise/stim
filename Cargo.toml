@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 jpeg-decoder = "0.1.15"
 image = "*"
+clap = "2"

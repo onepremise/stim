@@ -1,5 +1,7 @@
 extern crate image;
+extern crate clap;
 
+use clap::{Arg, App, AppSettings, SubCommand};
 use image::{ImageBuffer, GenericImageView};
 use std::fs::File;
 use std::io::Write;
@@ -14,10 +16,46 @@ use std::path::Path;
 use std::env;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    println!("My path is {}.", args[0]);
-    process_image("images/agent2_.jpg".to_string());
-    println!("COMPLETE.");
+    let app = App::new("stim")
+        .setting(AppSettings::ColorAuto)
+        .setting(AppSettings::ColoredHelp)
+        .setting(AppSettings::DeriveDisplayOrder)
+        .setting(AppSettings::UnifiedHelpMessage)
+        .version("0.1")
+        .about("Steganographic processor for finding hidden content in files")
+    .arg(Arg::with_name("reverse")
+        .short("r")
+        .long("reverse")
+        .value_name("FILE")
+        .help("reverse content of file, from tail to head")
+        .takes_value(true))
+    .arg(Arg::with_name("lsb_tech")
+        .short("l")
+        .long("lsb")
+        .value_name("FILE")
+        .help("Extract content using least significant bit technique")
+        .takes_value(true));
+
+    let matches = app.get_matches();
+
+//    let lsb_tech = matches.value_of("lsb_tech");
+
+    if let Some(source) = matches.value_of("reverse") {
+        reverse_file(source.to_string(), false);
+    }
+
+    if let Some(source) = matches.value_of("lsb_tech") {
+        process_image(source.to_string());
+    }
+
+
+//    match lsb_tech {
+//        None => None,
+//        Some(s) => {
+//            println!("My path is {}.", s.to_string());
+////            process_image("images/agent2_.jpg".to_string())
+//        }
+//    };
 }
 
 fn process_image(image: String) {
@@ -47,6 +85,7 @@ fn process_image(image: String) {
 
     let (width, height) = source_img.dimensions();
 
+    println!("processing image: {}", image);
     println!("dimensions {:?}", (width, height));
     println!("{:?}", source_img.color());
 
@@ -94,6 +133,8 @@ fn process_image(image: String) {
     grn_target.save(string_grn_ch.as_str()).unwrap();
     blue_target.save(string_blue_ch.as_str()).unwrap();
     alpha_target.save(string_alpha_ch.as_str()).unwrap();
+
+    println!("complete.");
 }
 
 fn process_slot(channel_file: &mut File, lsb_slot: &mut Vec<u8>) {
@@ -118,11 +159,16 @@ fn transform_bytes(lsb_slot: &mut Vec<u8>, big_endian: bool) -> u8 {
         }
     }
 
-    println!("result before {:#b}", result);
+//    println!("result before {:#b}", result);
 
 //    println!("result after {:#b}", result.rotate_right(7));
 
     lsb_slot.clear();
 
     result
+}
+
+fn reverse_file(image: String, big_endian: bool) {
+    println!("processing image: {}", image);
+    println!("Sorry WIP, please be patient...");
 }
