@@ -56,9 +56,9 @@ fn main() {
 }
 
 fn process_image(image: String, swap_endian: bool) {
-    let string_red = image.clone() + &".red.txt".to_string();
-    let string_grn = image.clone() + &".grn.txt".to_string();
-    let string_blue = image.clone() + &".blu.txt".to_string();
+    let string_red = image.clone() + &".red.lsb1.scan".to_string();
+    let string_grn = image.clone() + &".grn.lsb1.scan".to_string();
+    let string_blue = image.clone() + &".blu.lsb1.scan".to_string();
 //    let string_alpha = image.clone() + &".alp.txt".to_string();
 
     let string_red_ch = image.clone() + &".red.jpg".to_string();
