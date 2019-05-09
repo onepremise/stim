@@ -14,9 +14,6 @@ use std::path::Path;
 //use std::ffi::OsString;
 //use std::ffi::OsStr;
 //use std::convert::AsRef;
-use std::env;
-
-use std::io::BufReader;
 
 fn main() {
     let app = App::new("stim")
@@ -54,11 +51,11 @@ fn main() {
     }
 
     if let Some(source) = matches.value_of("lsb_tech") {
-        process_image(source.to_string());
+        process_image(source.to_string(),matches.is_present("switch_endian"));
     }
 }
 
-fn process_image(image: String) {
+fn process_image(image: String, swap_endian: bool) {
     let string_red = image.clone() + &".red.txt".to_string();
     let string_grn = image.clone() + &".grn.txt".to_string();
     let string_blue = image.clone() + &".blu.txt".to_string();
@@ -124,9 +121,9 @@ fn process_image(image: String) {
         grn_lsb_slot.push(green_val & lsb_byte);
         blu_lsb_slot.push(blue_val & lsb_byte);
 
-        process_slot(&mut r_channel_file, &mut red_lsb_slot);
-        process_slot(&mut g_channel_file, &mut grn_lsb_slot);
-        process_slot(&mut b_channel_file, &mut blu_lsb_slot);
+        process_slot(&mut r_channel_file, &mut red_lsb_slot, swap_endian);
+        process_slot(&mut g_channel_file, &mut grn_lsb_slot, swap_endian);
+        process_slot(&mut b_channel_file, &mut blu_lsb_slot, swap_endian);
     }
 
     red_target.save(string_red_ch.as_str()).unwrap();
@@ -137,22 +134,22 @@ fn process_image(image: String) {
     println!("complete.");
 }
 
-fn process_slot(channel_file: &mut File, lsb_slot: &mut Vec<u8>) {
+fn process_slot(channel_file: &mut File, lsb_slot: &mut Vec<u8>, swap_endian: bool) {
     if lsb_slot.len() == 8 {
-        let lsb_result= transform_bytes(lsb_slot, false);
+        let lsb_result= transform_bytes(lsb_slot, swap_endian);
 //        println!("result {:#b}", lsb_result);
         channel_file.write_all(&[lsb_result]).expect("Unable to write data");
 //        exit(0);
     }
 }
 
-fn transform_bytes(lsb_slot: &mut Vec<u8>, big_endian: bool) -> u8 {
+fn transform_bytes(lsb_slot: &mut Vec<u8>, swap_endian: bool) -> u8 {
     let mut result = 0b0000_0000;
 
     for x in 1..9 {
         let byte=lsb_slot.get(x-1).unwrap();
 //        println!("byte {}, {:#b}", x, *byte);
-        if big_endian {
+        if swap_endian {
             result |= *byte << x-1;
         } else {
             result |= *byte << 8 - x;
@@ -234,4 +231,27 @@ fn reverse_file(file_loc: String, swap_endian: bool) {
     }
 
     println!("complete.");
+}
+
+fn test_write(file_loc: String) {
+    let string_reverse = file_loc.clone() + &".test.jpg".to_string();
+    let r_path = Path::new(string_reverse.as_str());
+
+    let path = Path::new(file_loc.as_str());
+
+    let mut file = File::open(&path).unwrap();
+    let mut r_file = File::create(&r_path).unwrap();
+
+    let mut data: Vec<u8> = Vec::with_capacity(file.metadata().unwrap().len() as usize);
+
+    file.read_to_end(&mut data).unwrap();
+
+    let mut data_iter = data.iter();
+    let mut bytes_count: i32 = 0;
+
+    while let Some(byte) = data_iter.next() {
+        r_file.write_all(&[*byte]).expect("Unable to write data");
+        bytes_count += 1;
+    }
+    println!("bytes written: {}", bytes_count);
 }
