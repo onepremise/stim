@@ -360,7 +360,7 @@ fn main() {
             .short("l")
             .long("lsb_bit_len")
             .value_name("FILE")
-            .help("Number of lsb bits your would like to use. 1, 2, 4, bits, default is 1.")
+            .help("Number of lsb bits your would like to use. 1 - 8, bits, default is 1.")
             .default_value("1")
             .takes_value(true))
     .arg(Arg::with_name("switch_endian")
