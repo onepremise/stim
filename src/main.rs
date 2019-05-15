@@ -2,7 +2,7 @@ extern crate image;
 extern crate clap;
 
 use clap::{Arg, App, AppSettings};
-use image::{ImageBuffer, GenericImageView};
+use image::{ImageBuffer, GenericImageView, Rgba};
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
@@ -15,8 +15,20 @@ use std::path::Path;
 //use std::ffi::OsStr;
 //use std::convert::AsRef;
 
+use std::process;
+use std::str::FromStr;
+//use std::cell::RefCell;
+
 struct StegProcessor {
-    file_name: String
+    file_name: String,
+    h_buffer: Option<ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    lsb_bit_len: usize,
+    lsb_byte: u8,
+    find_content: bool,
+    find_hidden_img: bool,
+    r_channel_file: Option<File>,
+    g_channel_file: Option<File>,
+    b_channel_file: Option<File>
 }
 
 impl StegProcessor {
@@ -29,22 +41,42 @@ impl StegProcessor {
         self.file_name = x;
     }
 
-    pub fn get_path(&self) -> &String { &self.file_name }
+    pub fn set_find_content(&mut self, c: bool) {
+        self.find_content = c;
+    }
+
+    pub fn set_find_hidden_img(&mut self, h: bool) {
+        self.find_hidden_img = h;
+    }
+
+    pub fn is_finding_content(&self) -> bool { self.find_content }
+    pub fn is_finding_image(&self) -> bool { self.find_hidden_img }
 
     pub fn default() -> StegProcessor {
-        StegProcessor { file_name: "".to_string()}
+        StegProcessor {
+            file_name: "".to_string(),
+            h_buffer: None,
+            lsb_bit_len:0,
+            lsb_byte: 0,
+            find_content: false,
+            find_hidden_img: false,
+            r_channel_file: None,
+            g_channel_file: None,
+            b_channel_file: None
+        }
 
     }
 
-    fn init_paths(file_name: String) {
+    pub fn process_image(&mut self, swap_endian: bool, bit_len_str: String) {
+        self.lsb_bit_len = usize::from_str(bit_len_str.as_str()).unwrap();
 
-    }
+        self.validate_bit_len();
 
-    pub fn process_image(&mut self, lsb_image: bool, swap_endian: bool) {
-        let string_red = self.file_name.clone() + &".red.lsb1.scan".to_string();
-        let string_grn = self.file_name.clone() + &".grn.lsb1.scan".to_string();
-        let string_blue = self.file_name.clone() + &".blu.lsb1.scan".to_string();
-//    let string_alpha = image.clone() + &".alp.txt".to_string();
+        self.lsb_byte = self.build_lsb_mask(self.lsb_bit_len);
+
+        let string_red = self.file_name.clone() + &".red.lsb".to_string() + &bit_len_str + &".scan".to_string();
+        let string_grn = self.file_name.clone() + &".grn.lsb".to_string() + &bit_len_str + &".scan".to_string();
+        let string_blue = self.file_name.clone() + &".blu.lsb".to_string() + &bit_len_str + &".scan".to_string();
 
         let string_red_ch = self.file_name.clone() + &".red.jpg".to_string();
         let string_grn_ch = self.file_name.clone() + &".grn.jpg".to_string();
@@ -59,11 +91,11 @@ impl StegProcessor {
 
         let source_img = image::open(&path).unwrap();
 
-        let mut r_channel_file = File::create(&r_path).unwrap();
-        let mut g_channel_file = File::create(&g_path).unwrap();
-        let mut b_channel_file = File::create(&b_path).unwrap();
-//    let result = jpeg::JPEGDecoder::new(f);
-//    let decoder = result.unwrap();
+        if self.find_content {
+            self.r_channel_file = Some(File::create(&r_path).unwrap());
+            self.g_channel_file = Some(File::create(&g_path).unwrap());
+            self.b_channel_file = Some(File::create(&b_path).unwrap());
+        }
 
         let (width, height) = source_img.dimensions();
 
@@ -76,8 +108,7 @@ impl StegProcessor {
         let mut blue_target = ImageBuffer::new(width, height);
         let mut alpha_target = ImageBuffer::new(width, height);
 
-        let lsb_byte: u8 = 0b0000_0001;
-        let lsb2_byte: u8 = 0b0000_0011;
+        self.h_buffer = Some(ImageBuffer::new(width, height));
 
         let mut red_lsb_slot : Vec<u8> = Vec::new();
         let mut grn_lsb_slot : Vec<u8> = Vec::new();
@@ -102,71 +133,131 @@ impl StegProcessor {
             grn_target.put_pixel(x, y, grn_only);
             blue_target.put_pixel(x, y, blu_only);
 
-            red_lsb_slot.push(red_val & lsb_byte);
-            grn_lsb_slot.push(green_val & lsb_byte);
-            blu_lsb_slot.push(blue_val & lsb_byte);
+            if self.find_content {
+                self.process_content(&mut red_lsb_slot, &mut grn_lsb_slot,
+                                     &mut blu_lsb_slot, red_val, green_val, blue_val,
+                                     swap_endian);
+            }
 
-            self.merge_hidden_image(red_val & lsb_byte,
-                               green_val & lsb_byte,
-                               blue_val & lsb_byte,
-                               alpha_val);
-
-            self.process_slot(&mut r_channel_file, &mut red_lsb_slot, swap_endian);
-            self.process_slot(&mut g_channel_file, &mut grn_lsb_slot, swap_endian);
-            self.process_slot(&mut b_channel_file, &mut blu_lsb_slot, swap_endian);
+            if self.find_hidden_img {
+                self.merge_hidden_image(x, y, red_val,green_val,
+                                        blue_val,alpha_val);
+            }
         }
 
-        red_target.save(string_red_ch.as_str()).unwrap();
-        grn_target.save(string_grn_ch.as_str()).unwrap();
-        blue_target.save(string_blue_ch.as_str()).unwrap();
-        alpha_target.save(string_alpha_ch.as_str()).unwrap();
+        if self.find_content {
+            red_target.save(string_red_ch.as_str()).unwrap();
+            grn_target.save(string_grn_ch.as_str()).unwrap();
+            blue_target.save(string_blue_ch.as_str()).unwrap();
+            alpha_target.save(string_alpha_ch.as_str()).unwrap();
+        }
+
+        if self.find_hidden_img {
+            if let Some(ref mut b) = self.h_buffer {
+                let h_img=self.file_name.clone() + &".recovered.lsb".to_string() + &bit_len_str + &".png".to_string();
+                b.save(h_img).unwrap();
+            }
+        }
 
         println!("complete.");
     }
 
-    fn build_lsb_mask(num : u32) -> u8 {
+    fn validate_bit_len(&mut self) {
+        match self.lsb_bit_len {
+            1 | 2 | 3| 4 => println!("Using lsb length: {}", self.lsb_bit_len),
+            _ => {
+                println!("Invalid bit length: {}, currently only support 1,2,4", self.lsb_bit_len);
+                process::exit(0);
+            },
+        }
+    }
+
+    fn build_lsb_mask(&mut self, num : usize) -> u8 {
         let mut result = 0b0000_0001;
-        for x in 2..num {
+        for _x in 1..num {
             result <<=1;
             result |= 0b0000_0001;
         }
 
+        println!("using bit mask: 0b{:08b}", result);
+
         result
     }
 
-    pub fn merge_hidden_image(&mut self, _red_val: u8, _green_val: u8, _blue_val: u8, _alpha_val: u8) {
+    pub fn merge_hidden_image(&mut self, x: u32, y: u32, _red_val: u8,
+                              _green_val: u8, _blue_val: u8, _alpha_val: u8) {
+//        println!("byte before {}, 0b{:08b}", 8/self.lsb_bit_len, (self.lsb_byte & _red_val));
+        let new_red=(self.lsb_byte & _red_val) << (8-self.lsb_bit_len);
+        let new_grn=(self.lsb_byte & _green_val) << (8-self.lsb_bit_len);
+        let new_blu=(self.lsb_byte & _blue_val) << (8-self.lsb_bit_len);
+//        println!("byte after {}, 0b{:08b}", 8/self.lsb_bit_len, new_red);
+        let new_pixel = image::Rgba([new_red, new_grn, new_blu, _alpha_val]);
 
+        if let Some(ref mut b) = self.h_buffer {
+            b.put_pixel(x, y, new_pixel);
+        }
     }
 
-    fn process_slot(&mut self, channel_file: &mut File, lsb_slot: &mut Vec<u8>, swap_endian: bool) {
-        if lsb_slot.len() == 8 {
+    fn process_content(&mut self, red_lsb_slot : &mut Vec<u8>, grn_lsb_slot : &mut Vec<u8>,
+                       blu_lsb_slot : &mut Vec<u8>, red_val: u8, green_val: u8, blue_val: u8,
+                       swap_endian: bool) {
+        red_lsb_slot.push(red_val & self.lsb_byte);
+        grn_lsb_slot.push(green_val & self.lsb_byte);
+        blu_lsb_slot.push(blue_val & self.lsb_byte);
+
+        self.process_slot("red", red_lsb_slot, swap_endian);
+        self.process_slot("green", grn_lsb_slot, swap_endian);
+        self.process_slot("blue", blu_lsb_slot, swap_endian);
+    }
+
+    fn process_slot(&mut self, channel: &str, lsb_slot: &mut Vec<u8>, swap_endian: bool) {
+        // 8/3 results in floor return, 2
+        if lsb_slot.len() == (8/self.lsb_bit_len) {
             let lsb_result= self.transform_bytes(lsb_slot, swap_endian);
 //        println!("result {:#b}", lsb_result);
-            channel_file.write_all(&[lsb_result]).expect("Unable to write data");
-//        exit(0);
+            match channel.as_ref() {
+                "red" => {
+                    if let Some(ref mut _file) = self.r_channel_file {
+                        _file.write_all(&[lsb_result]).expect("Unable to write data");
+                    }
+                },
+                "green" => {
+                    if let Some(ref mut _file) = self.g_channel_file {
+                        _file.write_all(&[lsb_result]).expect("Unable to write data");
+                    }
+                },
+                "blue" => {
+                    if let Some(ref mut _file) = self.b_channel_file {
+                        _file.write_all(&[lsb_result]).expect("Unable to write data");
+                    }
+                },
+                _ => {
+                    println!("Channel type required!");
+                    process::exit(0);
+                }
+            }
         }
     }
 
     fn transform_bytes(&mut self, lsb_slot: &mut Vec<u8>, swap_endian: bool) -> u8 {
         let mut result = 0b0000_0000;
 
-        for x in 1..9 {
+        for x in 1..(8/self.lsb_bit_len)+1 {
             let byte=lsb_slot.get(x-1).unwrap();
-//        println!("byte {}, {:#b}", x, *byte);
-            if swap_endian {
-                result |= *byte << x-1;
-            } else {
-                result |= *byte << 8 - x;
-            }
+//            println!("byte before {}, 0b{:08b}", x, *byte);
+            result |= *byte << 8 - (x*self.lsb_bit_len);
+//            println!("byte after {}, 0b{:08b}", x, result);
         }
-
-//    println!("result before {:#b}", result);
-
-//    println!("result after {:#b}", result.rotate_right(7));
 
         lsb_slot.clear();
 
-        result
+        if swap_endian {
+            self.reverse_bits(result)
+        } else {
+            result
+        }
+
+//        process::exit(0);
     }
 
     fn reverse_bits(&mut self, byte: u8) -> u8 {
@@ -253,7 +344,7 @@ fn main() {
         .help("reverse content of file, from tail to head")
         .takes_value(true))
 
-    .arg(Arg::with_name("lsb_tech")
+    .arg(Arg::with_name("lsb_content")
         .short("c")
         .long("content")
         .value_name("FILE")
@@ -261,9 +352,16 @@ fn main() {
         .takes_value(true))
     .arg(Arg::with_name("lsb_image")
             .short("i")
-            .long("lsb-image")
+            .long("lsb_image")
             .value_name("FILE")
-            .help("Extract a hidden image using least significant bit technique")
+            .help("Extract a hidden image using least significant bit technique: \nhttps://towardsdatascience.com/steganography-hiding-an-image-inside-another-77ca66b2acb1")
+            .takes_value(true))
+    .arg(Arg::with_name("lsb_bit_len")
+            .short("l")
+            .long("lsb_bit_len")
+            .value_name("FILE")
+            .help("Number of lsb bits your would like to use. 1, 2, 4, bits, default is 1.")
+            .default_value("1")
             .takes_value(true))
     .arg(Arg::with_name("switch_endian")
         .short("sw")
@@ -274,19 +372,36 @@ fn main() {
 
     let matches = app.get_matches();
 
-//    let lsb_tech = matches.value_of("lsb_tech");
+    let mut steg_processor = StegProcessor::default();
 
-    let mut steg_processor= StegProcessor::default();
+    let bit_len = matches.value_of("lsb_bit_len").unwrap();
 
     if let Some(source) = matches.value_of("reverse") {
         steg_processor.set_path(source.to_string());
         steg_processor.reverse_file(source.to_string(), matches.is_present("switch_endian"));
     }
 
-    if let Some(source) = matches.value_of("lsb_tech") {
+    if let Some(source) = matches.value_of("lsb_content") {
         steg_processor.set_path(source.to_string());
-        steg_processor.process_image(matches.is_present("lsb_image"),
-                      matches.is_present("switch_endian"));
+        steg_processor.set_find_content(true);
+    }
+
+    if let Some(source) = matches.value_of("lsb_image") {
+        steg_processor.set_path(source.to_string());
+        steg_processor.set_find_hidden_img(true);
+    }
+
+    if steg_processor.is_finding_content() || steg_processor.is_finding_image() {
+        steg_processor.process_image(matches.is_present("switch_endian"),
+                                     bit_len.to_string());
     }
 }
 
+//#[cfg(test)]
+//mod tests {
+//
+//    #[test]
+//    fn test_add() {
+//        assert_eq!(add(1, 2), 3);
+//    }
+//}
