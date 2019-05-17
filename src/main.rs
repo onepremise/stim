@@ -28,7 +28,8 @@ struct StegProcessor {
     find_hidden_img: bool,
     r_channel_file: Option<File>,
     g_channel_file: Option<File>,
-    b_channel_file: Option<File>
+    b_channel_file: Option<File>,
+    a_channel_file: Option<File>
 }
 
 impl StegProcessor {
@@ -62,7 +63,8 @@ impl StegProcessor {
             find_hidden_img: false,
             r_channel_file: None,
             g_channel_file: None,
-            b_channel_file: None
+            b_channel_file: None,
+            a_channel_file: None
         }
 
     }
@@ -77,6 +79,7 @@ impl StegProcessor {
         let string_red = self.file_name.clone() + &".red.lsb".to_string() + &bit_len_str + &".scan".to_string();
         let string_grn = self.file_name.clone() + &".grn.lsb".to_string() + &bit_len_str + &".scan".to_string();
         let string_blue = self.file_name.clone() + &".blu.lsb".to_string() + &bit_len_str + &".scan".to_string();
+        let string_alp = self.file_name.clone() + &".alp.lsb".to_string() + &bit_len_str + &".scan".to_string();
 
         let string_red_ch = self.file_name.clone() + &".red.jpg".to_string();
         let string_grn_ch = self.file_name.clone() + &".grn.jpg".to_string();
@@ -88,6 +91,7 @@ impl StegProcessor {
         let r_path = Path::new(string_red.as_str());
         let g_path = Path::new(string_grn.as_str());
         let b_path = Path::new(string_blue.as_str());
+        let a_path = Path::new(string_alp.as_str());
 
         let source_img = image::open(&path).unwrap();
 
@@ -95,6 +99,7 @@ impl StegProcessor {
             self.r_channel_file = Some(File::create(&r_path).unwrap());
             self.g_channel_file = Some(File::create(&g_path).unwrap());
             self.b_channel_file = Some(File::create(&b_path).unwrap());
+            self.a_channel_file = Some(File::create(&a_path).unwrap());
         }
 
         let (width, height) = source_img.dimensions();
@@ -113,6 +118,7 @@ impl StegProcessor {
         let mut red_lsb_slot : Vec<u8> = Vec::new();
         let mut grn_lsb_slot : Vec<u8> = Vec::new();
         let mut blu_lsb_slot : Vec<u8> = Vec::new();
+        let mut alp_lsb_slot : Vec<u8> = Vec::new();
 
         for (x, y, pixel) in alpha_target.enumerate_pixels_mut() {
             let src_pixel = source_img.get_pixel(x, y);
@@ -135,21 +141,26 @@ impl StegProcessor {
 
             if self.find_content {
                 self.process_content(&mut red_lsb_slot, &mut grn_lsb_slot,
-                                     &mut blu_lsb_slot, red_val, green_val, blue_val,
+                                     &mut blu_lsb_slot, &mut alp_lsb_slot,
+                                     red_val, green_val, blue_val,alpha_val,
                                      swap_endian);
             }
 
             if self.find_hidden_img {
                 self.merge_hidden_image(x, y, red_val,green_val,
-                                        blue_val,alpha_val);
+                                        blue_val,alpha_val, swap_endian);
             }
         }
 
         if self.find_content {
+
             red_target.save(string_red_ch.as_str()).unwrap();
             grn_target.save(string_grn_ch.as_str()).unwrap();
             blue_target.save(string_blue_ch.as_str()).unwrap();
             alpha_target.save(string_alpha_ch.as_str()).unwrap();
+
+//            let file_type=tree_magic::from_filepath(r_path);
+//            println!("Mime type: {}", file_type);
         }
 
         if self.find_hidden_img {
@@ -164,9 +175,9 @@ impl StegProcessor {
 
     fn validate_bit_len(&mut self) {
         match self.lsb_bit_len {
-            1 | 2 | 3| 4 => println!("Using lsb length: {}", self.lsb_bit_len),
+            1 | 2 | 3| 4 | 5| 6 | 7 | 8=> println!("Using lsb length: {}", self.lsb_bit_len),
             _ => {
-                println!("Invalid bit length: {}, currently only support 1,2,4", self.lsb_bit_len);
+                println!("Invalid bit length: {}, currently only support 1-8", self.lsb_bit_len);
                 process::exit(0);
             },
         }
@@ -185,13 +196,18 @@ impl StegProcessor {
     }
 
     pub fn merge_hidden_image(&mut self, x: u32, y: u32, _red_val: u8,
-                              _green_val: u8, _blue_val: u8, _alpha_val: u8) {
+                              _green_val: u8, _blue_val: u8, _alpha_val: u8, swap_endian: bool) {
 //        println!("byte before {}, 0b{:08b}", 8/self.lsb_bit_len, (self.lsb_byte & _red_val));
         let new_red=(self.lsb_byte & _red_val) << (8-self.lsb_bit_len);
         let new_grn=(self.lsb_byte & _green_val) << (8-self.lsb_bit_len);
         let new_blu=(self.lsb_byte & _blue_val) << (8-self.lsb_bit_len);
 //        println!("byte after {}, 0b{:08b}", 8/self.lsb_bit_len, new_red);
-        let new_pixel = image::Rgba([new_red, new_grn, new_blu, _alpha_val]);
+
+        let new_pixel =if swap_endian {
+            image::Rgba([self.reverse_bits(new_red), self.reverse_bits(new_grn), self.reverse_bits(new_blu), _alpha_val])
+        } else {
+            image::Rgba([new_red, new_grn, new_blu, _alpha_val])
+        };
 
         if let Some(ref mut b) = self.h_buffer {
             b.put_pixel(x, y, new_pixel);
@@ -199,15 +215,17 @@ impl StegProcessor {
     }
 
     fn process_content(&mut self, red_lsb_slot : &mut Vec<u8>, grn_lsb_slot : &mut Vec<u8>,
-                       blu_lsb_slot : &mut Vec<u8>, red_val: u8, green_val: u8, blue_val: u8,
-                       swap_endian: bool) {
+                       blu_lsb_slot : &mut Vec<u8>, alp_lsb_slot : &mut Vec<u8>,
+                       red_val: u8, green_val: u8, blue_val: u8, alp_val:u8, swap_endian: bool) {
         red_lsb_slot.push(red_val & self.lsb_byte);
         grn_lsb_slot.push(green_val & self.lsb_byte);
         blu_lsb_slot.push(blue_val & self.lsb_byte);
+        alp_lsb_slot.push(alp_val & self.lsb_byte);
 
         self.process_slot("red", red_lsb_slot, swap_endian);
         self.process_slot("green", grn_lsb_slot, swap_endian);
         self.process_slot("blue", blu_lsb_slot, swap_endian);
+        self.process_slot("alpha", alp_lsb_slot, swap_endian);
     }
 
     fn process_slot(&mut self, channel: &str, lsb_slot: &mut Vec<u8>, swap_endian: bool) {
@@ -215,6 +233,7 @@ impl StegProcessor {
         if lsb_slot.len() == (8/self.lsb_bit_len) {
             let lsb_result= self.transform_bytes(lsb_slot, swap_endian);
 //        println!("result {:#b}", lsb_result);
+
             match channel.as_ref() {
                 "red" => {
                     if let Some(ref mut _file) = self.r_channel_file {
@@ -228,6 +247,11 @@ impl StegProcessor {
                 },
                 "blue" => {
                     if let Some(ref mut _file) = self.b_channel_file {
+                        _file.write_all(&[lsb_result]).expect("Unable to write data");
+                    }
+                },
+                "alpha" => {
+                    if let Some(ref mut _file) = self.a_channel_file {
                         _file.write_all(&[lsb_result]).expect("Unable to write data");
                     }
                 },
