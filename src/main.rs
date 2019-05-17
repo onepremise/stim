@@ -165,7 +165,7 @@ impl StegProcessor {
 
         if self.find_hidden_img {
             if let Some(ref mut b) = self.h_buffer {
-                let h_img=self.file_name.clone() + &".recovered.lsb".to_string() + &bit_len_str + &".png".to_string();
+                let h_img=self.file_name.clone() + &".recovered.lsb".to_string() + &bit_len_str + &".bmp".to_string();
                 b.save(h_img).unwrap();
             }
         }
